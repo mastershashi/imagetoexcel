@@ -9,7 +9,7 @@ param(
     [switch]$Silent = $false
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -281,20 +281,20 @@ Write-Info "pip upgraded."
 
 # Install CPU-only PyTorch first (much smaller than GPU version)
 Write-Info "Installing PyTorch (CPU-only, ~200 MB) ..."
-& $PipExe install torch torchvision --index-url https://download.pytorch.org/whl/cpu --quiet
+& $PipExe install torch torchvision --index-url https://download.pytorch.org/whl/cpu --quiet 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Warn "PyTorch install via CPU index failed, trying default ..."
-    & $PipExe install torch torchvision --quiet
+    & $PipExe install torch torchvision --quiet 2>&1 | Out-Null
 }
 Write-Success "PyTorch installed."
 
 # Install remaining requirements
 Write-Info "Installing EasyOCR, OpenCV, and other packages ..."
 $ReqFile = Join-Path $InstallDir "requirements.txt"
-& $PipExe install -r $ReqFile --quiet
+& $PipExe install -r $ReqFile --quiet 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
-    Write-Err "Some dependencies failed to install. Retrying without --quiet ..."
-    & $PipExe install -r $ReqFile
+    Write-Err "Some dependencies failed to install. Retrying ..."
+    & $PipExe install -r $ReqFile 2>&1 | ForEach-Object { Write-Info $_ }
     if ($LASTEXITCODE -ne 0) {
         Write-Err "Dependency installation failed. Check your internet connection."
         Read-Host "Press Enter to exit"
@@ -316,7 +316,8 @@ print('MODEL_OK')
 "@
 
 $modelResult = & $VenvPython -c $modelScript 2>&1
-if ($modelResult -match "MODEL_OK") {
+$modelOutput = $modelResult | Out-String
+if ($modelOutput -match "MODEL_OK") {
     Write-Success "OCR model downloaded and ready."
 } else {
     Write-Warn "Model will download on first app launch instead."
