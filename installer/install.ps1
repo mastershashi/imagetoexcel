@@ -247,18 +247,39 @@ Write-Host ""
 # =========================================================================
 Write-Step "3/7" "Creating Python virtual environment ..."
 
+# Kill any running FormToExcel processes that lock the venv
+$procs = Get-Process -Name "python", "pythonw" -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -like "*FormToExcel*" }
+if ($procs) {
+    Write-Info "Closing running Form To Excel instances ..."
+    $procs | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+}
+
 $VenvDir = Join-Path $InstallDir "venv"
 
 if (Test-Path $VenvDir) {
     Write-Info "Existing venv found, removing ..."
-    Remove-Item -Path $VenvDir -Recurse -Force
+    try {
+        Remove-Item -Path $VenvDir -Recurse -Force -ErrorAction Stop
+    } catch {
+        Write-Warn "Could not remove old venv. Retrying after killing Python processes ..."
+        Get-Process -Name "python", "pythonw" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 3
+        Remove-Item -Path $VenvDir -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path $VenvDir) {
+            Write-Warn "Skipping venv removal. Will reuse existing venv."
+        }
+    }
 }
 
-& $PythonCmd -m venv $VenvDir
-if ($LASTEXITCODE -ne 0) {
-    Write-Err "Failed to create virtual environment."
-    Read-Host "Press Enter to exit"
-    exit 1
+if (-not (Test-Path $VenvDir)) {
+    & $PythonCmd -m venv $VenvDir
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "Failed to create virtual environment."
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
 }
 
 Write-Success "Virtual environment created."
