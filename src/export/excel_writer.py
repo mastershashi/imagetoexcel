@@ -141,6 +141,10 @@ def export_to_excel(all_ocr_data, excel_path, on_progress=None):
     for i, ocr_data in enumerate(all_ocr_data):
         record = _build_excel_record(ocr_data)
 
+        has_data = any(v for v in record.values())
+        if on_progress and not has_data:
+            on_progress(i + 1, total, f"WARNING: Record {i+1} has no data after mapping")
+
         if is_duplicate(existing_rows, record):
             skipped += 1
             if on_progress:

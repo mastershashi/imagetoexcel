@@ -5,9 +5,12 @@ Simple flow: Select Image Folder -> Select Output Excel -> Process All Images
 No calibration needed - OCR reads the full image and extracts fields automatically.
 """
 
+import logging
 import os
+import sys
 import threading
 import tkinter as tk
+from datetime import datetime
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
@@ -18,6 +21,18 @@ from src.processing.image_reader import get_image_files
 from src.processing.aligner import load_and_align
 from src.processing.ocr_engine import get_reader, ocr_full_image
 from src.export.excel_writer import export_to_excel
+
+LOG_DIR = os.path.dirname(os.path.abspath(sys.argv[0])) if sys.argv[0] else os.getcwd()
+LOG_FILE = os.path.join(LOG_DIR, "form_to_excel.log")
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE, mode="w", encoding="utf-8"),
+    ],
+)
+logger = logging.getLogger("FormToExcel")
 
 
 ctk.set_appearance_mode("dark")
@@ -36,6 +51,13 @@ class FormToExcelApp(ctk.CTk):
         self.image_folder = ""
         self.excel_path = ""
         self.processing = False
+
+        logger.info("=" * 60)
+        logger.info("Form to Excel started at %s", datetime.now().isoformat())
+        logger.info("Log file: %s", LOG_FILE)
+        logger.info("Python: %s", sys.version)
+        logger.info("Working dir: %s", os.getcwd())
+        logger.info("=" * 60)
 
         self._build_ui()
 
@@ -134,6 +156,7 @@ class FormToExcelApp(ctk.CTk):
     def _log(self, message):
         self.log_text.insert("end", message + "\n")
         self.log_text.see("end")
+        logger.info(message)
 
     def _select_folder(self):
         folder = filedialog.askdirectory(title="Select folder containing form images")
@@ -204,19 +227,46 @@ class FormToExcelApp(ctk.CTk):
                 ))
 
                 try:
+                    self.after(0, lambda fn=filename: self._log(f"  Loading image..."))
                     aligned, success = load_and_align(file_path)
+                    self.after(0, lambda s=aligned.shape, ok=success: self._log(
+                        f"  Image loaded: {s[1]}x{s[0]}px, form detected: {ok}"
+                    ))
+
+                    self.after(0, lambda: self._log(f"  Running OCR..."))
                     ocr_data = ocr_full_image(aligned, reader)
 
+                    non_empty = sum(1 for v in ocr_data.values() if v)
+                    self.after(0, lambda n=non_empty: self._log(
+                        f"  OCR done - {n} fields extracted:"
+                    ))
                     self.after(0, lambda d=dict(ocr_data): self._log_result(d))
                     all_data.append(ocr_data)
                     self.after(0, lambda d=ocr_data: self._add_to_preview(d))
 
                 except Exception as e:
-                    self.after(0, lambda fn=filename, err=e: self._log(
-                        f"  ERROR: {fn}: {err}"
+                    import traceback
+                    tb = traceback.format_exc()
+                    self.after(0, lambda fn=filename, err=e, t=tb: self._log(
+                        f"  ERROR processing {fn}:\n  {err}\n  {t}"
                     ))
 
-            self.after(0, lambda: self._log(f"\nOCR complete. Read {len(all_data)} forms."))
+            self.after(0, lambda n=len(all_data): self._log(
+                f"\nOCR complete. Successfully read {n} of {total} forms."
+            ))
+            if len(all_data) == 0:
+                self.after(0, lambda: self._log(
+                    "WARNING: No data was extracted from any image!\n"
+                    "Check the errors above. Common causes:\n"
+                    "  - Images too small/low quality\n"
+                    "  - Wrong image format\n"
+                    "  - File path issues on Windows"
+                ))
+                self.after(0, lambda: messagebox.showwarning(
+                    "No Data", "No data could be extracted from the images.\n"
+                    "Check the log for details."
+                ))
+                return
             self.after(0, lambda: self._log("Exporting to Excel..."))
 
             def on_export_progress(current, total_count, msg):
@@ -243,6 +293,8 @@ class FormToExcelApp(ctk.CTk):
             ))
 
         except Exception as e:
+            import traceback
+            logger.error("Fatal error: %s\n%s", e, traceback.format_exc())
             self.after(0, lambda: self._log(f"\nFatal error: {e}"))
             self.after(0, lambda: messagebox.showerror("Error", str(e)))
         finally:
