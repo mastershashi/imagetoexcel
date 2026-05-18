@@ -6,8 +6,11 @@ then uses row ordering and keyword matching to extract named fields.
 No calibration needed.
 """
 
+import logging
 import re
 import easyocr
+
+logger = logging.getLogger("FormToExcel")
 
 _reader = None
 
@@ -176,7 +179,13 @@ def ocr_full_image(image, reader=None):
     if reader is None:
         reader = get_reader()
 
+    logger.info("OCR input image shape: %s, dtype: %s", image.shape, image.dtype)
+
     results = reader.readtext(image, detail=1, paragraph=False)
+
+    logger.info("EasyOCR returned %d raw text blocks", len(results))
+    for i, (bbox, text, conf) in enumerate(results):
+        logger.debug("  Block %d: conf=%.2f text='%s' bbox=%s", i, conf, text, bbox)
 
     empty = {
         "student_name": "", "father_name": "", "mother_name": "",
@@ -185,10 +194,16 @@ def ocr_full_image(image, reader=None):
     }
 
     if not results:
+        logger.warning("EasyOCR returned NO results at all")
         return empty
 
     rows = _merge_into_rows(results)
+    logger.info("Merged into %d rows", len(rows))
+    for i, row in enumerate(rows):
+        logger.info("  Row %d: '%s'", i, _row_text(row))
+
     if not rows:
+        logger.warning("No rows after merging")
         return empty
 
     data_rows = []
@@ -198,19 +213,22 @@ def ocr_full_image(image, reader=None):
         text = _row_text(row)
 
         if _is_header_row(text):
+            logger.info("    -> SKIPPED (header row)")
             continue
 
         t_lower = text.lower()
         if ('sec' in t_lower and 'roll' in t_lower) or 'roll no' in t_lower:
             sec_roll_row = text
+            logger.info("    -> SEC/ROLL row: '%s'", text)
             continue
 
         if re.search(r'd[ae]te\s*of\s*birth|d\.?o\.?b', t_lower):
-            dob_text = text
             data_rows.append(("dob", text))
+            logger.info("    -> DOB row: '%s'", text)
             continue
 
         data_rows.append(("data", text))
+        logger.info("    -> DATA row: '%s'", text)
 
     extracted = dict(empty)
 
@@ -260,6 +278,10 @@ def ocr_full_image(image, reader=None):
             val = re.sub(r'[^a-zA-Z\s]', '', val).strip()
             val = re.sub(r'\s+', ' ', val)
         extracted[key] = val.upper() if val else ""
+
+    logger.info("Final extracted fields:")
+    for k, v in extracted.items():
+        logger.info("  %s: '%s'", k, v)
 
     return extracted
 

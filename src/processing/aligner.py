@@ -5,9 +5,12 @@ Detects the form boundary (largest rectangle) in a photographed image
 and applies a perspective warp to produce a standardized, flat image.
 """
 
+import logging
 import cv2
 import numpy as np
 from src.config.template_config import STANDARD_WIDTH, STANDARD_HEIGHT
+
+logger = logging.getLogger("FormToExcel")
 
 
 def _read_image(image_path):
@@ -111,10 +114,15 @@ def align_form(image, target_width=STANDARD_WIDTH, target_height=STANDARD_HEIGHT
 
 def load_and_align(image_path, target_width=STANDARD_WIDTH, target_height=STANDARD_HEIGHT):
     """Load an image from disk and align it."""
+    logger.info("Loading image: %s", image_path)
     image = _read_image(image_path)
     if image is None:
+        logger.error("Failed to read image: %s", image_path)
         raise ValueError(
             f"Could not read image: {image_path}\n"
             f"Make sure the file is a valid image (JPG, PNG, BMP, TIFF)."
         )
-    return align_form(image, target_width, target_height)
+    logger.info("Raw image shape: %s", image.shape)
+    aligned, success = align_form(image, target_width, target_height)
+    logger.info("Aligned image shape: %s, form detected: %s", aligned.shape, success)
+    return aligned, success
