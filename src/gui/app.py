@@ -378,9 +378,10 @@ class FormToExcelApp(ctk.CTk):
             messagebox.showwarning("No Images", "No images found in the selected folder.")
             return
 
-        self._log("Loading first image for calibration...")
+        self._log(f"Loading first image for calibration: {files[0]}")
         try:
             aligned, success = load_and_align(files[0])
+            self._log(f"Image loaded. Shape: {aligned.shape}. Form detected: {success}")
             if not success:
                 self._log("Warning: Could not detect form boundary. Using resized image.")
 
@@ -396,7 +397,7 @@ class FormToExcelApp(ctk.CTk):
                 )
         except Exception as e:
             self._log(f"Calibration error: {e}")
-            messagebox.showerror("Error", f"Failed to load image:\n{e}")
+            messagebox.showerror("Error", f"Failed to load image:\n{e}\n\nFile: {files[0]}")
 
     def _process(self):
         if self.processing:

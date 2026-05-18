@@ -10,6 +10,23 @@ import numpy as np
 from src.config.template_config import STANDARD_WIDTH, STANDARD_HEIGHT
 
 
+def _read_image(image_path):
+    """
+    Read an image from disk, handling Unicode paths and special characters
+    that cv2.imread cannot handle on Windows.
+    """
+    try:
+        data = np.fromfile(image_path, dtype=np.uint8)
+        image = cv2.imdecode(data, cv2.IMREAD_COLOR)
+    except Exception:
+        image = None
+
+    if image is None:
+        image = cv2.imread(image_path)
+
+    return image
+
+
 def order_points(pts):
     """Order 4 points as: top-left, top-right, bottom-right, bottom-left."""
     rect = np.zeros((4, 2), dtype="float32")
@@ -51,20 +68,26 @@ def align_form(image, target_width=STANDARD_WIDTH, target_height=STANDARD_HEIGHT
     Detect the form in the image and warp it to a standard rectangle.
 
     Returns:
-        aligned_image: The perspective-corrected image, or None on failure.
+        aligned_image: The perspective-corrected image.
         success: Boolean indicating if alignment was successful.
     """
+    if image is None or image.size == 0:
+        raise ValueError("Image is empty or could not be decoded.")
+
+    h, w = image.shape[:2]
+    if h == 0 or w == 0:
+        raise ValueError(f"Image has invalid dimensions: {w}x{h}")
+
     corners = find_form_contour(image)
 
     if corners is None:
-        h, w = image.shape[:2]
         aspect = w / h
         if aspect > (target_width / target_height):
             new_w = target_width
-            new_h = int(target_width / aspect)
+            new_h = max(1, int(target_width / aspect))
         else:
             new_h = target_height
-            new_w = int(target_height * aspect)
+            new_w = max(1, int(target_height * aspect))
         resized = cv2.resize(image, (new_w, new_h))
         padded = np.zeros((target_height, target_width, 3), dtype=np.uint8) + 255
         y_off = (target_height - new_h) // 2
@@ -87,7 +110,10 @@ def align_form(image, target_width=STANDARD_WIDTH, target_height=STANDARD_HEIGHT
 
 def load_and_align(image_path, target_width=STANDARD_WIDTH, target_height=STANDARD_HEIGHT):
     """Load an image from disk and align it."""
-    image = cv2.imread(image_path)
+    image = _read_image(image_path)
     if image is None:
-        raise ValueError(f"Could not read image: {image_path}")
+        raise ValueError(
+            f"Could not read image: {image_path}\n"
+            f"Make sure the file is a valid image (JPG, PNG, BMP, TIFF)."
+        )
     return align_form(image, target_width, target_height)
