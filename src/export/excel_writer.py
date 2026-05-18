@@ -109,7 +109,7 @@ def _style_worksheet(ws):
     col_widths = {
         "Name": 25, "Father Name": 25, "Mother Name": 25,
         "Class": 12, "Roll No": 10, "Sec": 8,
-        "Address": 35, "Date of Birth": 15,
+        "Address": 35, "Date of Birth": 15, "Photo No": 12,
     }
     for col_idx, col_name in enumerate(EXCEL_COLUMNS, 1):
         ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = (

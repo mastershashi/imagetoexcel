@@ -38,6 +38,7 @@ EXCEL_COLUMNS = [
     "Sec",
     "Address",
     "Date of Birth",
+    "Photo No",
 ]
 
 FIELD_TO_EXCEL = {

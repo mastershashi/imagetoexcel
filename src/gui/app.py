@@ -17,7 +17,7 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 import cv2
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw
 import numpy as np
 
 from src.config.template_config import (
@@ -34,6 +34,12 @@ from src.export.excel_writer import export_to_excel
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
+REGION_COLORS = [
+    "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4",
+    "#FFEAA7", "#DDA0DD", "#98D8C8", "#F7DC6F",
+    "#BB8FCE", "#85C1E9"
+]
+
 
 class CalibrationWindow(ctk.CTkToplevel):
     """
@@ -44,7 +50,7 @@ class CalibrationWindow(ctk.CTkToplevel):
     def __init__(self, parent, aligned_image, current_regions):
         super().__init__(parent)
         self.title("Calibrate Field Regions")
-        self.geometry("1300x750")
+        self.geometry("1300x800")
         self.resizable(True, True)
 
         self.aligned_image = aligned_image
@@ -57,10 +63,13 @@ class CalibrationWindow(ctk.CTkToplevel):
         self.result = None
 
         self._display_scale = 1.0
+        self._img_offset_x = 0
+        self._img_offset_y = 0
         self._photo = None
+        self._resize_job = None
 
         self._build_ui()
-        self.after(200, self._draw_image)
+        self._render_initial_image()
 
     def _build_ui(self):
         top_frame = ctk.CTkFrame(self)
@@ -84,11 +93,10 @@ class CalibrationWindow(ctk.CTkToplevel):
         save_btn = ctk.CTkButton(top_frame, text="Save & Close", command=self._save)
         save_btn.pack(side="right", padx=5)
 
-        canvas_frame = ctk.CTkFrame(self)
+        canvas_frame = ctk.CTkFrame(self, fg_color="transparent")
         canvas_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-        self.canvas = tk.Canvas(canvas_frame, bg="#1a1a1a", highlightthickness=0,
-                                width=1200, height=620)
+        self.canvas = tk.Canvas(canvas_frame, bg="#2b2b2b", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
 
         self.canvas.bind("<ButtonPress-1>", self._on_mouse_down)
@@ -101,7 +109,12 @@ class CalibrationWindow(ctk.CTkToplevel):
         self.status_label = ctk.CTkLabel(status_frame, text="Select a field, then draw on the image.")
         self.status_label.pack(side="left")
 
+    def _render_initial_image(self):
+        """Render the image after a short delay to let the window fully appear."""
+        self.after(300, self._draw_image)
+
     def _draw_image(self):
+        """Render the form image with region overlays onto the canvas using Pillow."""
         img_rgb = cv2.cvtColor(self.aligned_image, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(img_rgb)
 
@@ -109,9 +122,9 @@ class CalibrationWindow(ctk.CTkToplevel):
         cw = self.canvas.winfo_width()
         ch = self.canvas.winfo_height()
 
-        if cw < 50 or ch < 50:
+        if cw < 100 or ch < 100:
             cw = 1200
-            ch = 620
+            ch = 680
 
         scale_w = cw / pil_img.width
         scale_h = ch / pil_img.height
@@ -121,21 +134,13 @@ class CalibrationWindow(ctk.CTkToplevel):
         new_h = max(1, int(pil_img.height * self._display_scale))
         pil_img = pil_img.resize((new_w, new_h), Image.LANCZOS)
 
-        self._photo = ImageTk.PhotoImage(pil_img)
-        self.canvas.delete("all")
         self._img_offset_x = max(0, (cw - new_w) // 2)
         self._img_offset_y = max(0, (ch - new_h) // 2)
-        self.canvas.create_image(self._img_offset_x, self._img_offset_y, anchor="nw", image=self._photo)
 
-        self._draw_all_regions()
+        canvas_img = Image.new("RGB", (cw, ch), (43, 43, 43))
+        canvas_img.paste(pil_img, (self._img_offset_x, self._img_offset_y))
 
-    def _draw_all_regions(self):
-        self.canvas.delete("region")
-        colors = [
-            "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4",
-            "#FFEAA7", "#DDA0DD", "#98D8C8", "#F7DC6F",
-            "#BB8FCE", "#85C1E9"
-        ]
+        draw = ImageDraw.Draw(canvas_img)
         for i, field_name in enumerate(FIELD_NAMES):
             if field_name in self.regions:
                 r = self.regions[field_name]
@@ -146,19 +151,19 @@ class CalibrationWindow(ctk.CTkToplevel):
                 y1 = int(r["y"] * s) + oy
                 x2 = int((r["x"] + r["w"]) * s) + ox
                 y2 = int((r["y"] + r["h"]) * s) + oy
-                color = colors[i % len(colors)]
-                self.canvas.create_rectangle(
-                    x1, y1, x2, y2, outline=color, width=2, tags="region"
-                )
-                self.canvas.create_text(
-                    x1 + 4, y1 + 2, text=field_name, anchor="nw",
-                    fill=color, font=("Arial", 9, "bold"), tags="region"
-                )
+                color = REGION_COLORS[i % len(REGION_COLORS)]
+                draw.rectangle([x1, y1, x2, y2], outline=color, width=2)
+                draw.text((x1 + 4, y1 + 2), field_name, fill=color)
+
+        self._photo = ImageTk.PhotoImage(canvas_img)
+        self.canvas.delete("all")
+        self.canvas.create_image(0, 0, anchor="nw", image=self._photo)
 
     def _on_canvas_resize(self, event):
-        """Redraw image when window is resized."""
-        if self._photo is not None:
-            self._draw_image()
+        """Debounced redraw on window resize."""
+        if self._resize_job is not None:
+            self.after_cancel(self._resize_job)
+        self._resize_job = self.after(150, self._draw_image)
 
     def _on_field_change(self, value):
         self.status_label.configure(text=f"Draw rectangle for: {value}")
@@ -208,7 +213,8 @@ class CalibrationWindow(ctk.CTkToplevel):
         if self.rect_id:
             self.canvas.delete(self.rect_id)
             self.rect_id = None
-        self._draw_all_regions()
+
+        self._draw_image()
 
         idx = FIELD_NAMES.index(field_name)
         if idx + 1 < len(FIELD_NAMES):
@@ -322,7 +328,8 @@ class FormToExcelApp(ctk.CTk):
         tree_container = ctk.CTkFrame(table_frame, fg_color="transparent")
         tree_container.pack(fill="both", expand=True, padx=5, pady=5)
 
-        columns = ("Name", "Father Name", "Mother Name", "Class", "Roll No", "Sec", "Address", "DOB")
+        columns = ("Name", "Father Name", "Mother Name", "Class",
+                   "Roll No", "Sec", "Address", "DOB", "Photo No")
         self.tree = tk.ttk.Treeview(tree_container, columns=columns, show="headings", height=8)
 
         style = tk.ttk.Style()
@@ -333,12 +340,13 @@ class FormToExcelApp(ctk.CTk):
                         font=("Calibri", 10, "bold"))
         style.map("Treeview", background=[("selected", "#3d5a80")])
 
-        col_widths = {"Name": 130, "Father Name": 120, "Mother Name": 120,
-                      "Class": 60, "Roll No": 60, "Sec": 40, "Address": 150, "DOB": 90}
+        col_widths = {"Name": 120, "Father Name": 110, "Mother Name": 110,
+                      "Class": 55, "Roll No": 55, "Sec": 35,
+                      "Address": 130, "DOB": 80, "Photo No": 60}
 
         for col in columns:
             self.tree.heading(col, text=col)
-            self.tree.column(col, width=col_widths.get(col, 100), anchor="center")
+            self.tree.column(col, width=col_widths.get(col, 80), anchor="center")
 
         scrollbar = tk.ttk.Scrollbar(tree_container, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
@@ -440,7 +448,7 @@ class FormToExcelApp(ctk.CTk):
                 self.after(0, lambda: self._log("No images found."))
                 return
 
-            self.after(0, lambda: self._log(f"Initializing OCR engine (first run downloads model ~100MB)..."))
+            self.after(0, lambda: self._log("Initializing OCR engine (first run downloads model ~100MB)..."))
             reader = get_reader()
             self.after(0, lambda: self._log("OCR engine ready."))
 
@@ -466,8 +474,11 @@ class FormToExcelApp(ctk.CTk):
                     field_images = extract_fields(aligned, self.field_regions)
                     ocr_data = ocr_all_fields(field_images, reader)
 
-                    all_data.append(ocr_data)
+                    self.after(0, lambda d=dict(ocr_data): self._log(
+                        f"  OCR result: {d}"
+                    ))
 
+                    all_data.append(ocr_data)
                     self.after(0, lambda d=ocr_data: self._add_to_preview(d))
 
                 except Exception as e:
@@ -509,7 +520,6 @@ class FormToExcelApp(ctk.CTk):
             self.after(0, self._processing_done)
 
     def _add_to_preview(self, ocr_data):
-        from src.config.template_config import FIELD_TO_EXCEL
         values = (
             ocr_data.get("student_name", ""),
             ocr_data.get("father_name", ""),
@@ -519,6 +529,7 @@ class FormToExcelApp(ctk.CTk):
             ocr_data.get("section", ""),
             ocr_data.get("address", ""),
             ocr_data.get("date_of_birth", ""),
+            ocr_data.get("photo_no", ""),
         )
         self.tree.insert("", "end", values=values)
 
