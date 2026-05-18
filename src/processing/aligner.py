@@ -14,6 +14,7 @@ def _read_image(image_path):
     """
     Read an image from disk, handling Unicode paths and special characters
     that cv2.imread cannot handle on Windows.
+    new version
     """
     try:
         data = np.fromfile(image_path, dtype=np.uint8)

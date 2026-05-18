@@ -57,9 +57,10 @@ class CalibrationWindow(ctk.CTkToplevel):
         self.result = None
 
         self._display_scale = 1.0
+        self._photo = None
 
         self._build_ui()
-        self._draw_image()
+        self.after(200, self._draw_image)
 
     def _build_ui(self):
         top_frame = ctk.CTkFrame(self)
@@ -86,12 +87,14 @@ class CalibrationWindow(ctk.CTkToplevel):
         canvas_frame = ctk.CTkFrame(self)
         canvas_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-        self.canvas = tk.Canvas(canvas_frame, bg="#1a1a1a", highlightthickness=0)
+        self.canvas = tk.Canvas(canvas_frame, bg="#1a1a1a", highlightthickness=0,
+                                width=1200, height=620)
         self.canvas.pack(fill="both", expand=True)
 
         self.canvas.bind("<ButtonPress-1>", self._on_mouse_down)
         self.canvas.bind("<B1-Motion>", self._on_mouse_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_mouse_up)
+        self.canvas.bind("<Configure>", self._on_canvas_resize)
 
         status_frame = ctk.CTkFrame(self)
         status_frame.pack(fill="x", padx=10, pady=5)
@@ -103,21 +106,25 @@ class CalibrationWindow(ctk.CTkToplevel):
         pil_img = Image.fromarray(img_rgb)
 
         self.update_idletasks()
-        cw = self.canvas.winfo_width() or 1100
-        ch = self.canvas.winfo_height() or 600
+        cw = self.canvas.winfo_width()
+        ch = self.canvas.winfo_height()
+
+        if cw < 50 or ch < 50:
+            cw = 1200
+            ch = 620
 
         scale_w = cw / pil_img.width
         scale_h = ch / pil_img.height
-        self._display_scale = min(scale_w, scale_h, 1.0)
+        self._display_scale = min(scale_w, scale_h)
 
-        new_w = int(pil_img.width * self._display_scale)
-        new_h = int(pil_img.height * self._display_scale)
+        new_w = max(1, int(pil_img.width * self._display_scale))
+        new_h = max(1, int(pil_img.height * self._display_scale))
         pil_img = pil_img.resize((new_w, new_h), Image.LANCZOS)
 
         self._photo = ImageTk.PhotoImage(pil_img)
         self.canvas.delete("all")
-        self._img_offset_x = (cw - new_w) // 2
-        self._img_offset_y = (ch - new_h) // 2
+        self._img_offset_x = max(0, (cw - new_w) // 2)
+        self._img_offset_y = max(0, (ch - new_h) // 2)
         self.canvas.create_image(self._img_offset_x, self._img_offset_y, anchor="nw", image=self._photo)
 
         self._draw_all_regions()
@@ -147,6 +154,11 @@ class CalibrationWindow(ctk.CTkToplevel):
                     x1 + 4, y1 + 2, text=field_name, anchor="nw",
                     fill=color, font=("Arial", 9, "bold"), tags="region"
                 )
+
+    def _on_canvas_resize(self, event):
+        """Redraw image when window is resized."""
+        if self._photo is not None:
+            self._draw_image()
 
     def _on_field_change(self, value):
         self.status_label.configure(text=f"Draw rectangle for: {value}")
